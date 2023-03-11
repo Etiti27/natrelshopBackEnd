@@ -19,9 +19,12 @@ app.use(session({
     secret: process.env.SESSION_SECRET,
     resave: false,
     saveUninitialized: true,
-    cookie: { secure: true }
+    cookie: { 
+        httpOnly:true,
+        maxAge: 360000
+    }
   }))
-
+  app.set('view engine', 'jsx');
 mongoose.set("strictQuery", false);
 const mongoDBUrl=`mongodb+srv://${process.env.DB_USERNAME}:${process.env.DB_PASSWORD}@cluster0.qqlrjp5.mongodb.net/NatrelTherapyDB`
 
@@ -99,6 +102,38 @@ const stories= new Ourstory({
 
 // stories.insertMany([Ourstory])
 
+const isProductInCart=(cart, ids)=>{
+    cart.map((carts)=>{
+        if(carts.id==ids){
+            return true
+        }
+    })
+    return false
+}
+// app.get("/cart", function(req, res){
+//     const cart= req.session.cart
+//     const total=req.session.total
+//     console.log(total);
+//     res.json(cart, total)
+    
+// })
+let cart;
+let total;
+const calculateTotal=(cart, req)=>{
+    total=0;
+    cart.map((carts)=>{
+        if(carts.salePrice){
+            total=total + (carts.salePrice * carts.quantity)
+        }
+        else{
+            total=total + (carts.price * carts.quantity)
+        }
+
+    })
+    req.session.total=total
+    return total
+    
+}
 
 app.get('/ourstory', function(req,res){
 
@@ -144,61 +179,52 @@ Product.find({}, function(err,products){
 })
 
 })
-const isProductInCart=(cart, id)=>{
-    cart.map((carts)=>{
-        if(carts.id==id){
-            return true
-        }
-    })
-    return false
-}
-// app.get("/cart", function(req, res){
-//     const cart= req.session.cart
-//     const total=req.session.total
-//     console.log(total);
-//     res.json(cart, total)
-    
-// })
-const calculateTotal=(cart, req)=>{
-    let total=0;
-    cart.map((carts)=>{
-        if(carts.salePrice){
-            total=total + (carts.salePrice * carts.quantity)
-        }
-        else{
-            total=total + (carts.price * carts.quantity)
-        }
 
-    })
-    req.session.total=total
-    return total
-    
-}
 
 app.post("/addToCart", function(req,res){
 
-const {names, quantity, price, salePrice, image}=req.body
+const {names, quantity, price, salePrice, image,id}=req.body
 
 const product={
 
-    names,quantity,price,salePrice,image
+    names,quantity,price,salePrice,image,id
 }
-console.log(product);
 
-if(req.session.cart){
-    let cart=req.session.cart
-    if(!isProductInCart(cart, id)){
-        cart.push(product)
-        calculateTotal(cart, req)
+// console.log(product);
+let ids=product.id
+
+
+    if(req.session.cart){
+        cart=req.session.cart
+        if(!isProductInCart(cart,ids)){
+        
+            cart.push(product);
+            
+        }
+       
     }
-}
-else{
-    req.session.cart=[product]
-    let cart=req.session.cart
-    calculateTotal(cart, req)
-}
+    else{
+        req.session.cart=[product] ;
+        cart= req.session.cart ;
+        
+       
+    }
+calculateTotal(cart, req)
 
+res.redirect('/cart')
+// console.log(req.session.cart)
+// console.log(req.session.total);;
 
+})
+
+app.get("/cart", function(req,res){
+    
+   
+
+    res.status(200).json({
+        total,
+        cart
+    })
 })
 
 
