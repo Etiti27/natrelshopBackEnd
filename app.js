@@ -226,8 +226,23 @@ app.get("/cart", function(req,res){
         cart
     })
 })
+let shipping=[]
 
 
+app.post("/shippingAddress", function(req, res){
+const {firstName, lastName, address, email, country, city, postalCode}=req.body
+const shippingData={
+    firstName,
+    lastName,
+    address,
+    email,
+    country,
+    city,
+    postalCode
+}
+shipping.push(shippingData)
+console.log(shipping);
+})
 
   app.listen(3000, function(){
     console.log(`connected successfulyy!!`);
