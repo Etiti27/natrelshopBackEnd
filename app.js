@@ -5,6 +5,10 @@ const mongoose= require("mongoose")
 const cors= require("cors")
 const bodyParser = require('body-parser')
 const session= require('express-session')
+const MongoDBStore = require('connect-mongodb-session')(session);
+const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
+const endpointSecret = process.env.STRIPE_ENDPOINT_SECRET
+
 
 
 
@@ -12,6 +16,9 @@ const session= require('express-session')
 
 // middlewares
 app.use(cors())
+// app.use('/stripe', stripe)
+
+  
 app.use(express.json())
 app.use(bodyParser.urlencoded({ extended: true }))
 app.use(bodyParser.json())
@@ -19,12 +26,14 @@ app.use(session({
     secret: process.env.SESSION_SECRET,
     resave: false,
     saveUninitialized: true,
+    secure:true, 
     cookie: { 
         httpOnly:true,
-        maxAge: 360000
+        maxAge: 360000000,
+        secure: true
     }
   }))
-  app.set('view engine', 'jsx');
+ 
 mongoose.set("strictQuery", false);
 const mongoDBUrl=`mongodb+srv://${process.env.DB_USERNAME}:${process.env.DB_PASSWORD}@cluster0.qqlrjp5.mongodb.net/NatrelTherapyDB`
 
@@ -119,6 +128,7 @@ const isProductInCart=(cart, ids)=>{
 // })
 let cart;
 let total;
+let shippingInfo=[];
 const calculateTotal=(cart, req)=>{
     total=0;
     cart.map((carts)=>{
@@ -221,12 +231,9 @@ app.get("/cart", function(req,res){
     
    
 
-    res.status(200).json({
-        total,
-        cart
-    })
+    res.json(cart)
 })
-let shipping=[]
+
 
 
 app.post("/shippingAddress", function(req, res){
@@ -244,6 +251,208 @@ shipping.push(shippingData)
 console.log(shipping);
 })
 
+
+
+
+
+
+//stripe integration
+app.post('/create-checkout-session', async (req, res) => {
+    const datas=req.body
+    
+
+   
+    
+    req.session.ship=datas
+    shippingInfo=req.session.ship
+    console.log(shippingInfo);
+
+    
+       const line_items= datas && datas.map((data)=>{
+            return {
+                    price_data: {
+                      currency: "usd",
+                      product_data: {
+                        name: data.names,
+                        
+                        // description: data.desc,
+                        metadata: {
+                          id: data.id,
+                        },
+                      },
+                      unit_amount: data.salePrice * 100,
+                    },
+                    quantity: data.quantity,
+                  };
+        })
+  
+  
+   
+    const session = await stripe.checkout.sessions.create({
+        
+        
+      line_items,
+    
+      payment_method_types: ["card"],
+      mode: 'payment',
+      success_url: 'http://localhost:3001/stripe-success',
+      cancel_url: 'http://localhost:3001/cancel',
+
+
+    //   shipping_address_collection: {
+    //     allowed_countries: ["US", "CA", "KE"],
+    //   },
+      shipping_options: [
+        {
+          shipping_rate_data: {
+            type: "fixed_amount",
+            fixed_amount: {
+              amount: 0,
+              currency: "usd",
+            },
+            display_name: "Free shipping",
+            // Delivers between 5-7 business days
+            delivery_estimate: {
+              minimum: {
+                unit: "business_day",
+                value: 5,
+              },
+              maximum: {
+                unit: "business_day",
+                value: 7,
+              },
+            },
+          },
+        },
+        {
+          shipping_rate_data: {
+            type: "fixed_amount",
+            fixed_amount: {
+              amount: 1500,
+              currency: "usd",
+            },
+            display_name: "Next day air",
+            // Delivers in exactly 1 business day
+            delivery_estimate: {
+              minimum: {
+                unit: "business_day",
+                value: 1,
+              },
+              maximum: {
+                unit: "business_day",
+                value: 1,
+              },
+            },
+          },
+        },
+      ],
+      phone_number_collection: {
+        enabled: true,
+      },
+    
+    });
+  
+    res.send({datas:datas,
+        url:session.url,
+        
+    });
+   
+  })
+
+
+
+ 
+
+
+
+app.post('/webhook', express.raw({type: 'application/json'}), (req, res) => {
+  let event = req.body;
+  let data
+  let eventType
+  // Only verify the event if you have an endpoint secret defined.
+  // Otherwise use the basic event deserialized with JSON.parse
+  if (endpointSecret) {
+    // Get the signature sent by Stripe
+    const signature = req.headers['stripe-signature'];
+    try {
+      event = stripe.webhooks.constructEvent(
+        req.body,
+        signature,
+        endpointSecret
+      );
+      console.log(`webhook verified`);
+    } catch (err) {
+      console.log(`⚠️  Webhook signature verification failed.`, err.message);
+      return res.sendStatus(400);
+    }
+    data=event.data.object
+    eventType=event.type
+  }
+  else{
+    data=event.data.object
+    eventType=event.type
+  }
+if(eventType==="checkout.session.completed"){
+    console.log(`checkout.session.completed`);
+    const shipSchema=new mongoose.Schema({
+        firstName:String,
+        lastName:String,
+        email:String,
+        address:String,
+        country:String,
+        city:String,
+        postalCode:String,
+        productName:String,
+        quantity:Number,
+        price:Number,
+        product_id:String,
+        date:String
+    })
+    const date = new Date();
+
+let day = date.getDate();
+let month = date.getMonth() + 1;
+let year = date.getFullYear();
+let currentDate = `${day}-${month}-${year}`
+
+    const Ship=mongoose.model('shippingInfo', shipSchema)
+shippingInfo && shippingInfo.map((shippi)=>{
+    const ship= new Ship({
+        product_id:shippi.id,
+        date:currentDate,
+        firstName:shippi.firstName,
+        lastName:shippi.lastName,
+        email:shippi.email,
+        address:shippi.address,
+        city:shippi.city,
+        country:shippi.country,
+        postalCode:shippi.postalCode,
+        productName:shippi.names,
+        quantity:shippi.quantity,
+        price:shippi.salePrice
+    })
+    ship.save().then(()=>{
+        console.log(`shipping successftluiiu`);
+    })
+})
+
+    
+
+}
+if(eventType==="payment_intent.created"){
+    console.log(`payment_intent.created`);
+    console.log(shippingInfo);
+}
+  
+
+  // Return a 200 response to acknowledge receipt of the event
+  res.send().end();
+});
+
+
+
+
+
   app.listen(3000, function(){
-    console.log(`connected successfulyy!!`);
+    console.log(`connected successfullyy!!!`);
   })
