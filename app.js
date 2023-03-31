@@ -51,48 +51,60 @@ const mongoDBUrl=`mongodb+srv://${process.env.DB_USERNAME}:${process.env.DB_PASS
   
 
   const productSchema= new mongoose.Schema({
-    productName:{
+    name:{
         type: String,
         required: true
     },
-    productDescription:{
+    desc:{
         type: String,
         required: true
     },
-    productSalePrice:{
+    salePrice:{
         type:Number,
         min:[1, "price can't be less than 1"]
     },
-    productPrice:{
+    price:{
         type: Number,
         min:[1, "price can't be less than 1"]
     },
-    productQuantity:{
+    quantity:{
         type:Number,
         min:[1, "quantity can't be less than 1'"]
     },
-    productMoreDescription:{
+    moreDesc:{
     type: String
 
     },
-    productIngredient:{
+    ingredient:{
         type: String
     }
     })
 const Product=mongoose.model('product',productSchema);
 const hairElixer= new Product({
-  productName:'HAIR ELIXER',
-  productDescription: 'There is nothing more satisfying than to have hair care technology that builds and strengthens your hair. With Sisay Cosmetics Golden Hair Elixer, you have just that, a rich 100% Natural Hair elixir that strengthens and adds shine to your precious hair.',
-  productSalePrice: 25,
-  productPrice: 50,
-  productQuantity:1,
-  productMoreDescription:`the secret to thick, healthy, and beautiful hair. the main and one of the most potent ingredients in this elixir is cold-pressed fenugreek oil ( essential oil). this potent plant possesses benefits catering specifically to hair.Fenugreek (Trigonella foenum-graecum). It has a 6000-year history and is commonly called Methi, high concentration of beneficial elements such as Vitamins A, B, and C, as well as phosphates, flavonoids, iron, saponins, and other minerals.It is rich in vitamins A, K, and C, folic acid, potassium, iron, calcium, and proteins, all of which are cornerstones for hair growth.`,
-  productIngredient:`Glycine Soja (Soybean) Oil, Trigonella Foenum-Graecum Seed Oil, Ricinus Communis (Castor) Seed Oil, Sesamum Indicum (Sesame) Seed Oil, Nigella Sativa Seed Oil, Tocopherol, Parfum,
+  name:'HAIR ELIXER',
+  desc: 'There is nothing more satisfying than to have hair care technology that builds and strengthens your hair. With Sisay Cosmetics Golden Hair Elixer, you have just that, a rich 100% Natural Hair elixir that strengthens and adds shine to your precious hair.',
+  salePrice: 25,
+  price: 50,
+  quantity:1,
+  moreDesc:`the secret to thick, healthy, and beautiful hair. the main and one of the most potent ingredients in this elixir is cold-pressed fenugreek oil ( essential oil). this potent plant possesses benefits catering specifically to hair.Fenugreek (Trigonella foenum-graecum). It has a 6000-year history and is commonly called Methi, high concentration of beneficial elements such as Vitamins A, B, and C, as well as phosphates, flavonoids, iron, saponins, and other minerals.It is rich in vitamins A, K, and C, folic acid, potassium, iron, calcium, and proteins, all of which are cornerstones for hair growth.`,
+  ingredient:`Glycine Soja (Soybean) Oil, Trigonella Foenum-Graecum Seed Oil, Ricinus Communis (Castor) Seed Oil, Sesamum Indicum (Sesame) Seed Oil, Nigella Sativa Seed Oil, Tocopherol, Parfum,
   Benzyl Benzoate, Limonene, Coumarin, Alpha Isomethyl Ionone, Cinnamal, Geraniol, Citronellol,
   Hexyl Cinnamal, Benzyl Salicylate, Benzyl Alcohol`
 })
 
-hairElixer.save()
+const dailyDetox= new Product({
+  name:'DAILY DETOX',
+  desc:'Daily Detox Elixir is a powerful blend of natural ingredients carefully selected to rid your body of harmful toxins and free radicals, allowing you to feel refreshed, rejuvenated, and ready to tackle whatever the day brings. ',
+  price:30,
+  salePrice:50,
+  quantity:1,
+  moreDesc:`Detoxification is essential for maintaining the health of our bodies, especially our hair. Toxins from the environment and the food we eat are continually present in our bodies. These toxins can build up in our organs over time, which can result in a number of health issues, including hair loss. These dangerous toxins can be eliminated from the body through detoxification, which also improves the efficiency of our organs.
+
+  There are different organs in our body that can benefit from detoxification for better hair growth.`
+
+})
+const defaultProduct=[hairElixer, dailyDetox]
+
 
 const OurStorySchema= new mongoose.Schema({
     story:{
@@ -134,7 +146,7 @@ const isProductInCart=(cart, ids)=>{
 // })
 let cart;
 let total;
-let quantity=1;
+
 let shippingInfo=[];
 const calculateTotal=(cart, req)=>{
     total=0;
@@ -184,7 +196,7 @@ app.get('/ourstory', function(req,res){
 app.get("/data", function(req,res){
 Product.find({}, function(err,products){
     if(products.length===0){
-        Product.insertMany([hairElixer], function(err){
+        Product.insertMany(defaultProduct, function(err){
             if(err){
                 throw err
             }
@@ -460,35 +472,7 @@ app.post('/create-checkout-session', async (req, res) => {
                   
 
 
-                    // Include the Sendinblue library\
-                   
                     
-
-
-                  //   var transporter = nodemailer.createTransport({
-                  //     host: 'naturalhairtherapist.com',
-                  //     service:"naturalhairtherapist.com",
-                  //     port:465,
-                  //     auth: {
-                  //       user: 'chris@naturalhairtherapist.com',
-                  //       pass: 'Obinna27@'
-                  //     }
-                  //   });
-                    
-                  //   var mailOptions = {
-                  //     from: 'chris@naturalhairtherapist.com',
-                  //     to: 'christopherobinna27@gmail.com',
-                  //     subject: 'Sending Email using Node.js',
-                  //     text: 'That was easy!'
-                  //   };
-                    
-                  //   transporter.sendMail(mailOptions, function(error, info){
-                  //     if (error) {
-                  //       console.log(error);
-                  //     } else {
-                  //       console.log('Email sent: ' + info.response);
-                  //     }
-                  //   });
 
                   })
                 })
@@ -497,38 +481,12 @@ app.post('/create-checkout-session', async (req, res) => {
     }
    
   
-    // Return a 200 response to acknowledge receipt of the event
+    
     response.send();
   
 })
 
-// app.post("/minus", (req,res)=>{
-// const {quantity:quan}= req.body
-//     quantity=quan
-//   console.log(quantity);
-
-
-//    console.log(cart);
-  
-//   calculateTotal(cart, req)
-//   console.log(total);
-//   res.redirect("/cart")
-  
-//   })  
-
-  // app.post("/plus", (req,res)=>{
-  //   const {quantity:quan}= req.body
-  //       quantity=quan
-  //     console.log(quantity);
-    
-    
-  //      console.log(cart);
-      
-  //     calculateTotal(cart, req)
-  //     console.log(total);
-  //     res.redirect("/cart")
-      
-  //     })  
+ 
 
   app.post('/posted', (req,res)=>{
 const {id, quantity, isIncrease, isDecrease} = req.body
