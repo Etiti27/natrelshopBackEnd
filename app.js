@@ -7,7 +7,10 @@ const bodyParser = require('body-parser')
 const session= require('express-session')
 const MongoDBStore = require('connect-mongodb-session')(session);
 const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
-const endpointSecret = process.env.STRIPE_ENDPOINT_SECRET
+const nodemailer=require('nodemailer')
+var SibApiV3Sdk = require('sib-api-v3-sdk');
+const postCalc=require("./routes/postRoutes/calculateQuan")
+
 
 
 
@@ -19,9 +22,12 @@ app.use(cors())
 // app.use('/stripe', stripe)
 
   
-app.use(express.json())
-app.use(bodyParser.urlencoded({ extended: true }))
-app.use(bodyParser.json())
+app.use('/minus', postCalc)
+
+
+app.use('/webhook', bodyParser.raw({type: "*/*"}))
+app.use(bodyParser.json({type: 'application/json'}))
+//app.use(bodyParser.json())
 app.use(session({
     secret: process.env.SESSION_SECRET,
     resave: false,
@@ -128,10 +134,11 @@ const isProductInCart=(cart, ids)=>{
 // })
 let cart;
 let total;
+let quantity=1;
 let shippingInfo=[];
 const calculateTotal=(cart, req)=>{
     total=0;
-    cart.map((carts)=>{
+    cart && cart.map((carts)=>{
         if(carts.salePrice){
             total=total + (carts.salePrice * carts.quantity)
         }
@@ -161,8 +168,8 @@ app.get('/ourstory', function(req,res){
         }
 
         
-            console.log(stories);
-            res.json(stories)
+            
+            res.send(stories)
         
         
     })
@@ -184,8 +191,8 @@ Product.find({}, function(err,products){
         })
         res.redirect('/data')
     }
-    console.log(products);
-    res.json(products)
+    
+    res.send(products)
 })
 
 })
@@ -228,13 +235,21 @@ res.redirect('/cart')
 })
 
 app.get("/cart", function(req,res){
+  
+    console.log(cart);
+    // calculateTotal(cart, req)
     
-   
+res.json(cart)
 
-    res.json(cart)
+    
 })
 
-
+app.get("/total", (req, res)=>{
+ 
+  
+  res.json(total)
+  
+})
 
 app.post("/shippingAddress", function(req, res){
 const {firstName, lastName, address, email, country, city, postalCode}=req.body
@@ -248,7 +263,7 @@ const shippingData={
     postalCode
 }
 shipping.push(shippingData)
-console.log(shipping);
+
 })
 
 
@@ -265,7 +280,7 @@ app.post('/create-checkout-session', async (req, res) => {
     
     req.session.ship=datas
     shippingInfo=req.session.ship
-    console.log(shippingInfo);
+    
 
     
        const line_items= datas && datas.map((data)=>{
@@ -359,100 +374,205 @@ app.post('/create-checkout-session', async (req, res) => {
    
   })
 
-
-
- 
-
-
-
-app.post('/webhook', express.raw({type: 'application/json'}), (req, res) => {
-  let event = req.body;
-  let data
-  let eventType
-  // Only verify the event if you have an endpoint secret defined.
-  // Otherwise use the basic event deserialized with JSON.parse
-  if (endpointSecret) {
-    // Get the signature sent by Stripe
-    const signature = req.headers['stripe-signature'];
+  let endpointSecret = process.env.STRIPE_ENDPOINT_SECRET
+  
+  
+  app.post('/webhook', bodyParser.raw({type: 'application/json'}), (request, response) => {
+    const sig = request.headers['stripe-signature'];
+  
+    let event;
+  
     try {
-      event = stripe.webhooks.constructEvent(
-        req.body,
-        signature,
-        endpointSecret
-      );
-      console.log(`webhook verified`);
+      event = stripe.webhooks.constructEvent(request.body, sig, endpointSecret);
     } catch (err) {
-      console.log(`⚠️  Webhook signature verification failed.`, err.message);
-      return res.sendStatus(400);
+      response.status(400).send(`Webhook Error: ${err.message}`);
+      return;
     }
-    data=event.data.object
-    eventType=event.type
-  }
-  else{
-    data=event.data.object
-    eventType=event.type
-  }
-if(eventType==="checkout.session.completed"){
-    console.log(`checkout.session.completed`);
-    const shipSchema=new mongoose.Schema({
-        firstName:String,
-        lastName:String,
-        email:String,
-        address:String,
-        country:String,
-        city:String,
-        postalCode:String,
-        productName:String,
-        quantity:Number,
-        price:Number,
-        product_id:String,
-        date:String
-    })
-    const date = new Date();
+  
+    // Handle the event
 
-let day = date.getDate();
-let month = date.getMonth() + 1;
-let year = date.getFullYear();
-let currentDate = `${day}-${month}-${year}`
+    if(event.type==="checkout.session.completed"){
+      const shipSchema=new mongoose.Schema({
+              firstName:String,
+              lastName:String,
+              email:String,
+              address:String,
+              country:String,
+              city:String,
+              postalCode:String,
+              productName:String,
+              quantity:Number,
+              price:Number,
+              product_id:String,
+              date:String
+          })
+          const Ship = mongoose.model('shippingInf', shipSchema)
+          const date = new Date();
 
-    const Ship=mongoose.model('shippingInfo', shipSchema)
-shippingInfo && shippingInfo.map((shippi)=>{
-    const ship= new Ship({
-        product_id:shippi.id,
-        date:currentDate,
-        firstName:shippi.firstName,
-        lastName:shippi.lastName,
-        email:shippi.email,
-        address:shippi.address,
-        city:shippi.city,
-        country:shippi.country,
-        postalCode:shippi.postalCode,
-        productName:shippi.names,
-        quantity:shippi.quantity,
-        price:shippi.salePrice
-    })
-    ship.save().then(()=>{
-        console.log(`shipping successftluiiu`);
-    })
+          let day = date.getDate();
+          let month = date.getMonth() + 1;
+          let year = date.getFullYear();
+          let currentDate = `${day}-${month}-${year}`
+
+          shippingInfo && shippingInfo.map((shippi)=>{
+              const ship= new Ship({
+                  product_id:shippi.id,
+                  date:currentDate,
+                  firstName:shippi.firstName,
+                  lastName:shippi.lastName,
+                  email:shippi.email,
+                  address:shippi.address,
+                  city:shippi.city,
+                  country:shippi.country,
+                  postalCode:shippi.postalCode,
+                  productName:shippi.names,
+                  quantity:shippi.quantity,
+                  price:shippi.salePrice
+                  })
+                  ship.save()
+                  .then(()=>{
+                    let defaultClient = SibApiV3Sdk.ApiClient.instance;
+
+                    let apiKey = defaultClient.authentications['api-key'];
+                    apiKey.apiKey = process.env.Sib_Api_Key;
+
+                    let apiInstance = new SibApiV3Sdk.TransactionalEmailsApi();
+
+                    const sender={
+                      email:"admin@naturalhairtherapist.com"
+                    }
+                    const receivers=[{
+                      email:'christopherobinna27@gmail.com'
+                    }]
+                    
+                    apiInstance.sendTransacEmail({
+                      sender:sender,
+                      to:receivers,
+                      subject:`this is a testing object`,
+                      textContent:`i am a content`
+
+                    }).then(function(data) {
+                      console.log('API called successfully. Returned data: ' + JSON.stringify(data));
+                    })
+                    .catch((err) => {
+                      console.log(err.message);
+                    })
+                  
+
+
+                    // Include the Sendinblue library\
+                   
+                    
+
+
+                  //   var transporter = nodemailer.createTransport({
+                  //     host: 'naturalhairtherapist.com',
+                  //     service:"naturalhairtherapist.com",
+                  //     port:465,
+                  //     auth: {
+                  //       user: 'chris@naturalhairtherapist.com',
+                  //       pass: 'Obinna27@'
+                  //     }
+                  //   });
+                    
+                  //   var mailOptions = {
+                  //     from: 'chris@naturalhairtherapist.com',
+                  //     to: 'christopherobinna27@gmail.com',
+                  //     subject: 'Sending Email using Node.js',
+                  //     text: 'That was easy!'
+                  //   };
+                    
+                  //   transporter.sendMail(mailOptions, function(error, info){
+                  //     if (error) {
+                  //       console.log(error);
+                  //     } else {
+                  //       console.log('Email sent: ' + info.response);
+                  //     }
+                  //   });
+
+                  })
+                })
+                
+
+    }
+   
+  
+    // Return a 200 response to acknowledge receipt of the event
+    response.send();
+  
 })
 
-    
+// app.post("/minus", (req,res)=>{
+// const {quantity:quan}= req.body
+//     quantity=quan
+//   console.log(quantity);
 
-}
-if(eventType==="payment_intent.created"){
-    console.log(`payment_intent.created`);
-    console.log(shippingInfo);
-}
+
+//    console.log(cart);
   
+//   calculateTotal(cart, req)
+//   console.log(total);
+//   res.redirect("/cart")
+  
+//   })  
 
-  // Return a 200 response to acknowledge receipt of the event
-  res.send().end();
-});
+  // app.post("/plus", (req,res)=>{
+  //   const {quantity:quan}= req.body
+  //       quantity=quan
+  //     console.log(quantity);
+    
+    
+  //      console.log(cart);
+      
+  //     calculateTotal(cart, req)
+  //     console.log(total);
+  //     res.redirect("/cart")
+      
+  //     })  
+
+  app.post('/posted', (req,res)=>{
+const {id, quantity, isIncrease, isDecrease} = req.body
+
+  if(isIncrease){
+    cart.forEach((item)=>{
+     
+        
+        if(item.quantity >=1){
+          item.quantity = item.quantity + 1
+        }
+        
+      
+    })
+  }
+  if(isDecrease){
+    cart.forEach((item)=>{
+     
+        
+      if(item.quantity > 1){
+        item.quantity = item.quantity - 1
+      }
+      
+    
+  })
+
+  }
+
+calculateTotal(cart, req)
+res.redirect('/cart')
+})
 
 
-
-
+app.post('/deletecart', (req,res)=>{
+  const {names, id}= req.body
+  cart && cart.map((cartItem)=>{
+    if(cartItem.id===id){
+      cart.splice(cart.indexOf(cartItem),1);
+    }
+  })
+  calculateTotal(cart,req)
+  res.redirect('/cart')
+})
 
   app.listen(3000, function(){
     console.log(`connected successfullyy!!!`);
-  })
+  })     
