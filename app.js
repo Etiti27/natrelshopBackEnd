@@ -5,20 +5,34 @@ const mongoose= require("mongoose")
 const cors= require("cors")
 const bodyParser = require('body-parser')
 const session= require('express-session')
-const MongoDBStore = require('connect-mongodb-session')(session);
+const MongoStore = require('connect-mongo')
 const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
 const nodemailer=require('nodemailer')
 var SibApiV3Sdk = require('sib-api-v3-sdk');
 const postCalc=require("./routes/postRoutes/calculateQuan")
+const _ =require('lodash')
+const cookieParser = require("cookie-parser")
+const ejs=require('ejs')
+const accountSid = process.env.ACCOUNT_SID;
+const authToken = process.env.AUTH_TOKEN;
+const client = require('twilio')(accountSid, authToken);
 
 
 
+//connecting to DB
+mongoose.set("strictQuery", false);
+const mongoDBUrl=`mongodb+srv://${process.env.DB_USERNAME}:${process.env.DB_PASSWORD}@cluster0.qqlrjp5.mongodb.net/NatrelTherapyDB`
 
+    mongoose.connect(mongoDBUrl)
 
 
 
 // middlewares
+app.set('view engine', 'ejs');
+app.use('/public', express.static("public"));
+app.use(bodyParser.urlencoded({ extended: true }));
 app.use(cors())
+app.use(cookieParser());
 // app.use('/stripe', stripe)
 
   
@@ -27,27 +41,42 @@ app.use('/minus', postCalc)
 
 app.use('/webhook', bodyParser.raw({type: "*/*"}))
 app.use(bodyParser.json({type: 'application/json'}))
-//app.use(bodyParser.json())
+app.set('trust proxy', 1)
+app.use(bodyParser.json())
+
 app.use(session({
-    secret: process.env.SESSION_SECRET,
-    resave: false,
-    saveUninitialized: true,
-    secure:true, 
-    cookie: { 
-        httpOnly:true,
-        maxAge: 360000000,
-        secure: true
-    }
+secret: process.env.SESSION_SECRET,
+resave: true,
+saveUninitialized: true,
+store: MongoStore.create({ mongoUrl: mongoDBUrl }),
+cookie:{maxAge: 3600 * 24,
+secure: true}
   }))
+
+
+// app.use(session({ 
+// secret: 'keyboard cat',
+// resave:false,
+// saveUninitialized: true,
+// cookie: { maxAge: 60000 }}))
+
+// Access the session as req.session
+app.get('/', function(req, res) {
+  if (req.session.views) {
+    req.session.views++
+    console.log(`i executtt`);
+    res.write(`<p>i am here </p>`)
+  } else {
+    req.session.views = 1
+    console.log(`me`);
+    res.end('welcome to the session demo. refresh!')
+  }
+  console.log(req.session);
+})
  
-mongoose.set("strictQuery", false);
-const mongoDBUrl=`mongodb+srv://${process.env.DB_USERNAME}:${process.env.DB_PASSWORD}@cluster0.qqlrjp5.mongodb.net/NatrelTherapyDB`
 
-    mongoose.connect(mongoDBUrl)
 
-    const aboutUsSchema= new mongoose.Schema({
-        
-    })
+   
   
 
   const productSchema= new mongoose.Schema({
@@ -69,7 +98,7 @@ const mongoDBUrl=`mongodb+srv://${process.env.DB_USERNAME}:${process.env.DB_PASS
     },
     quantity:{
         type:Number,
-        min:[1, "quantity can't be less than 1'"]
+        min:[1, "quantity can't be less than 1"]
     },
     moreDesc:{
     type: String
@@ -77,6 +106,9 @@ const mongoDBUrl=`mongodb+srv://${process.env.DB_USERNAME}:${process.env.DB_PASS
     },
     ingredient:{
         type: String
+    },
+    image:{
+      type:String
     }
     })
 const Product=mongoose.model('product',productSchema);
@@ -89,7 +121,8 @@ const hairElixer= new Product({
   moreDesc:`the secret to thick, healthy, and beautiful hair. the main and one of the most potent ingredients in this elixir is cold-pressed fenugreek oil ( essential oil). this potent plant possesses benefits catering specifically to hair.Fenugreek (Trigonella foenum-graecum). It has a 6000-year history and is commonly called Methi, high concentration of beneficial elements such as Vitamins A, B, and C, as well as phosphates, flavonoids, iron, saponins, and other minerals.It is rich in vitamins A, K, and C, folic acid, potassium, iron, calcium, and proteins, all of which are cornerstones for hair growth.`,
   ingredient:`Glycine Soja (Soybean) Oil, Trigonella Foenum-Graecum Seed Oil, Ricinus Communis (Castor) Seed Oil, Sesamum Indicum (Sesame) Seed Oil, Nigella Sativa Seed Oil, Tocopherol, Parfum,
   Benzyl Benzoate, Limonene, Coumarin, Alpha Isomethyl Ionone, Cinnamal, Geraniol, Citronellol,
-  Hexyl Cinnamal, Benzyl Salicylate, Benzyl Alcohol`
+  Hexyl Cinnamal, Benzyl Salicylate, Benzyl Alcohol`,
+  image:"HairElixir.jpeg"
 })
 
 const dailyDetox= new Product({
@@ -100,10 +133,16 @@ const dailyDetox= new Product({
   quantity:1,
   moreDesc:`Detoxification is essential for maintaining the health of our bodies, especially our hair. Toxins from the environment and the food we eat are continually present in our bodies. These toxins can build up in our organs over time, which can result in a number of health issues, including hair loss. These dangerous toxins can be eliminated from the body through detoxification, which also improves the efficiency of our organs.
 
-  There are different organs in our body that can benefit from detoxification for better hair growth.`
+  There are different organs in our body that can benefit from detoxification for better hair growth.`,
+  image: "dailytoxic.png"
 
 })
 const defaultProduct=[hairElixer, dailyDetox]
+// Product.insertMany(defaultProduct, function(err){
+//   if(err){
+//     throw err
+//   }
+// })
 
 
 const OurStorySchema= new mongoose.Schema({
@@ -129,13 +168,21 @@ const stories= new Ourstory({
 
 // stories.insertMany([Ourstory])
 
-const isProductInCart=(cart, ids)=>{
-    cart.map((carts)=>{
-        if(carts.id==ids){
-            return true
-        }
-    })
-    return false
+const isProductIsInCart=(cart, id)=>{
+   for (let i = 0; i < cart.length; i++) {
+    if(cart[i].id === id) {
+      return true;
+    }
+    
+   } 
+   return false 
+//   cart.forEach((cartItem)=>{
+//     if(cartItem.id === id) {
+//       return true;
+//     }
+//   })
+//   return false
+   
 }
 // app.get("/cart", function(req, res){
 //     const cart= req.session.cart
@@ -146,6 +193,7 @@ const isProductInCart=(cart, ids)=>{
 // })
 let cart;
 let total;
+let product;
 
 let shippingInfo=[];
 const calculateTotal=(cart, req)=>{
@@ -195,7 +243,7 @@ app.get('/ourstory', function(req,res){
 
 app.get("/data", function(req,res){
 Product.find({}, function(err,products){
-    if(products.length===0){
+    if(products.length<=1){
         Product.insertMany(defaultProduct, function(err){
             if(err){
                 throw err
@@ -205,53 +253,69 @@ Product.find({}, function(err,products){
     }
     
     res.send(products)
+    // res.render('home', {products:products})
 })
 
 })
 
 
-app.post("/addToCart", function(req,res){
+app.get("/data/:name", function(req,res){
+  const namer= _.upperCase(req.params.name)
+  
+  Product.find({name:namer}, function(err,products){
+      res.json(products)
+  })
+  
+  })
 
-const {names, quantity, price, salePrice, image,id}=req.body
+  app.use(function(req, res, next) {
+    req.session.cart=cart
+    next()
+  })
+  
 
-const product={
+app.post("/addtocart", function(req,res){
 
-    names,quantity,price,salePrice,image,id
-}
+const {name, quantity,  salePrice, image,id}=req.body;
 
-// console.log(product);
-let ids=product.id
 
+ product={name,quantity,salePrice,image,id}
 
     if(req.session.cart){
-        cart=req.session.cart
-        if(!isProductInCart(cart,ids)){
-        
-            cart.push(product);
-            
-        }
+      cart=req.session.cart;
        
-    }
-    else{
-        req.session.cart=[product] ;
-        cart= req.session.cart ;
-        
+      if(!isProductIsInCart(cart, id)){
+        cart.push(product)
+      }
        
+     
+    }else{
+      req.session.cart=[product]
+      
+      cart=req.session.cart;
+    
     }
+    
+      
+
+      
+      
+   
+
+        
 calculateTotal(cart, req)
 
-res.redirect('/cart')
-// console.log(req.session.cart)
-// console.log(req.session.total);;
 
-})
+res.redirect('/cart')
+
+
+
+    })
 
 app.get("/cart", function(req,res){
   
-    console.log(cart);
-    // calculateTotal(cart, req)
-    
-res.json(cart)
+//  console.log(cart);
+res.send(cart)
 
     
 })
@@ -287,33 +351,46 @@ shipping.push(shippingData)
 app.post('/create-checkout-session', async (req, res) => {
     const datas=req.body
     
-
-   
-    
     req.session.ship=datas
     shippingInfo=req.session.ship
     
-
+    req.session.shipper=datas[0]
+    mainshipper=req.session.shipper
+    // console.log(mainshipper.country);
+   req.session.productInfo=datas[1]
+   productInf=req.session.productInfo
+  //  console.log(testing);
     
-       const line_items= datas && datas.map((data)=>{
+       const line_items= datas && datas[1].map((data)=>{
+       
+        
+        // console.log(data);
+          
             return {
+              
                     price_data: {
-                      currency: "usd",
+                      currency: "eur",
                       product_data: {
-                        name: data.names,
+                        name: data.name && data.name,
                         
                         // description: data.desc,
                         metadata: {
-                          id: data.id,
+                          id: data.id && data.id,
                         },
                       },
-                      unit_amount: data.salePrice * 100,
+                      unit_amount: total * 100,
                     },
-                    quantity: data.quantity,
-                  };
+                    quantity: data.quantity && data.quantity
+                  
+                    
+                  }
+                  
+                
+                
+                
         })
   
-  
+  // console.log(line_items);
    
     const session = await stripe.checkout.sessions.create({
         
@@ -335,7 +412,7 @@ app.post('/create-checkout-session', async (req, res) => {
             type: "fixed_amount",
             fixed_amount: {
               amount: 0,
-              currency: "usd",
+              currency: "eur",
             },
             display_name: "Free shipping",
             // Delivers between 5-7 business days
@@ -356,7 +433,7 @@ app.post('/create-checkout-session', async (req, res) => {
             type: "fixed_amount",
             fixed_amount: {
               amount: 1500,
-              currency: "usd",
+              currency: "eur",
             },
             display_name: "Next day air",
             // Delivers in exactly 1 business day
@@ -404,6 +481,7 @@ app.post('/create-checkout-session', async (req, res) => {
     // Handle the event
 
     if(event.type==="checkout.session.completed"){
+      console.log(`completed`);
       const shipSchema=new mongoose.Schema({
               firstName:String,
               lastName:String,
@@ -426,23 +504,50 @@ app.post('/create-checkout-session', async (req, res) => {
           let year = date.getFullYear();
           let currentDate = `${day}-${month}-${year}`
 
-          shippingInfo && shippingInfo.map((shippi)=>{
+
+
+          
+          // console.log(shippingInfo);
+         const test= productInf.map((shippi)=>{
+            
+
               const ship= new Ship({
+            
                   product_id:shippi.id,
                   date:currentDate,
-                  firstName:shippi.firstName,
-                  lastName:shippi.lastName,
-                  email:shippi.email,
-                  address:shippi.address,
-                  city:shippi.city,
-                  country:shippi.country,
-                  postalCode:shippi.postalCode,
-                  productName:shippi.names,
+                  firstName:mainshipper.firstName,
+                  lastName:mainshipper.lastName,
+                  email:mainshipper.email,
+                  address:mainshipper.address,
+                  city:mainshipper.city,
+                  country:mainshipper.country,
+                  postalCode:mainshipper.postalCode,
+                  productName:shippi.name,
                   quantity:shippi.quantity,
                   price:shippi.salePrice
                   })
                   ship.save()
+                
                   .then(()=>{
+                    let count=1
+                    if(count===1){
+                      client.messages
+                        .create({
+                            body: 'thanks for the purchase',
+                            from: '+16073896804',
+                            to: '+2348108726007'
+                          })
+                          .then(message => console.log(message.sid));
+                          count++
+                          console.log(count);
+                          
+                    }
+                        
+                   
+
+                        })
+
+
                     let defaultClient = SibApiV3Sdk.ApiClient.instance;
 
                     let apiKey = defaultClient.authentications['api-key'];
@@ -475,7 +580,7 @@ app.post('/create-checkout-session', async (req, res) => {
                     
 
                   })
-                })
+               
                 
 
     }
@@ -489,29 +594,37 @@ app.post('/create-checkout-session', async (req, res) => {
  
 
   app.post('/posted', (req,res)=>{
-const {id, quantity, isIncrease, isDecrease} = req.body
+let {id, quantity, isIncrease, isDecrease} = req.body
 
   if(isIncrease){
-    cart.forEach((item)=>{
-     
-        
-        if(item.quantity >=1){
-          item.quantity = item.quantity + 1
-        }
-        
-      
-    })
-  }
-  if(isDecrease){
-    cart.forEach((item)=>{
-     
-        
-      if(item.quantity > 1){
-        item.quantity = item.quantity - 1
+    
+    cart.forEach((cartItem)=>{
+      if(cartItem.id===id){
+        cartItem.quantity=parseInt(cartItem.quantity) + 1
       }
       
+    })
+    }
+    // console.log(cart);
+ 
+  
+  if(isDecrease){
     
-  })
+     cart.forEach((item)=>{
+      if(item.id===id){
+         if(item.quantity > 1){
+        item.quantity = parseInt(item.quantity) - 1
+      }
+
+      }
+     
+
+     })
+        
+      
+      
+    
+  
 
   }
 
@@ -530,6 +643,39 @@ app.post('/deletecart', (req,res)=>{
   calculateTotal(cart,req)
   res.redirect('/cart')
 })
+
+let searchItem;
+app.post('/searchproduct', (req,res)=>{
+  const search=_.upperCase(req.body.search);
+  console.log(search);
+  Product.findOne({name:search}, function(err, result){
+    if(!result){
+      searchItem='not found!'
+      
+    }
+    if(!err){
+     
+      searchItem=result
+    }
+    
+    if(searchItem===null){
+      searchItem='not found!'
+    }
+    console.log(searchItem);
+    res.redirect('/searchedItem')
+  })
+})
+
+app.get("/searchedItem", function(req,res){
+  res.json(searchItem)
+
+})
+
+
+// Download the helper library from https://www.twilio.com/docs/node/install
+// Find your Account SID and Auth Token at twilio.com/console
+// and set the environment variables. See http://twil.io/secure
+
 
   app.listen(3000, function(){
     console.log(`connected successfullyy!!!`);
