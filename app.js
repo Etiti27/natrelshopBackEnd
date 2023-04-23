@@ -13,8 +13,8 @@ const postCalc=require("./routes/postRoutes/calculateQuan")
 const _ =require('lodash')
 const cookieParser = require("cookie-parser")
 const ejs=require('ejs')
-const accountSid = process.env.ACCOUNT_SID;
-const authToken = process.env.AUTH_TOKEN;
+const accountSid = process.env.ACCOUNT_SID || "AC270dd2e2d127e0c37be7d28f01be33cc";
+const authToken = process.env.AUTH_TOKEN || "0853ea933ac6bcca32934f71046f7152";
 const client = require('twilio')(accountSid, authToken);
 
 
@@ -46,7 +46,7 @@ app.use(bodyParser.json())
 
 app.use(session({
 secret: process.env.SESSION_SECRET,
-resave: true,
+resave: false,
 saveUninitialized: true,
 store: MongoStore.create({ mongoUrl: mongoDBUrl }),
 cookie:{maxAge: 3600 * 24,
@@ -62,16 +62,17 @@ secure: true}
 
 // Access the session as req.session
 app.get('/', function(req, res) {
-  if (req.session.views) {
-    req.session.views++
-    console.log(`i executtt`);
-    res.write(`<p>i am here </p>`)
-  } else {
-    req.session.views = 1
-    console.log(`me`);
-    res.end('welcome to the session demo. refresh!')
-  }
-  console.log(req.session);
+  // if (req.session.views) {
+  //   req.session.views++
+  //   console.log(`i executtt`);
+  //   res.write(`<p>i am here </p>`)
+  // } else {
+  //   req.session.views = 1
+  //   console.log(`me`);
+  //   res.end('welcome to the session demo. refresh!')
+  // }
+  // console.log(req.session);
+ 
 })
  
 
@@ -353,15 +354,18 @@ app.post('/create-checkout-session', async (req, res) => {
     
     req.session.ship=datas
     shippingInfo=req.session.ship
+    // console.log(shippingInfo);
     
     req.session.shipper=datas[0]
-    mainshipper=req.session.shipper
-    // console.log(mainshipper.country);
+     mainshipper=req.session.shipper
+    // console.log(mainshipper);
    req.session.productInfo=datas[1]
    productInf=req.session.productInfo
-  //  console.log(testing);
+   console.log(productInf);
+  
+   
     
-       const line_items= datas && datas[1].map((data)=>{
+       const line_items= productInf.map((data)=>{
        
         
         // console.log(data);
@@ -378,7 +382,7 @@ app.post('/create-checkout-session', async (req, res) => {
                           id: data.id && data.id,
                         },
                       },
-                      unit_amount: total * 100,
+                      unit_amount: data.salePrice * 100,
                     },
                     quantity: data.quantity && data.quantity
                   
@@ -505,10 +509,64 @@ app.post('/create-checkout-session', async (req, res) => {
           let currentDate = `${day}-${month}-${year}`
 
 
+          const body=`<div style={{color='green'}}> Dear ${mainshipper.firstName} ${mainshipper.lastName}, </div>
+          <br/>
+          <div>You have successfully Purchased the following product(s): </div>
+          ${productInf.map((product)=>{
+            return(
+            //  `product name : ${product.name}, 
+            //   Quantity : ${product.quantity}
+            //   Amount: ${product.salePrice}
 
+           `<table>
+              
+              <tr>
+                <th> Product ID:     ${product.id}</th> <br/>
+                <th> Name:     ${product.name}</th> <br/>
+                <th> Quantity:      ${product.quantity}</th> 
+                
+              </tr>
+
+            </table>
+             
+           `
+              
+            )
+          })}
+          <p>we know the world is full of choices. Thank you for choosing us! We appreciate it.</p>
+          <p>We'll let you know as soon as it ships. In the meantime, reach out to our friendly support team with any questions you have. They're super nice...</p>
+          <button style={{padding:"50%"}}><a href="mailto:support@natreltherapy.shop">Email Support</a></button>
+          `
+
+          console.log(body);
+          let transporter = nodemailer.createTransport({
+            host: "premium81.web-hosting.com",
+            port: 465,
+            secure: true, // true for 465, false for other ports
+            auth: {
+              user: "support@natreltherapy.shop", // generated ethereal user
+              pass: "Obinna123456", // generated ethereal password
+            },
+          });
+         
+          let mailOptions = {
+            from: `"Na'trel Therapy" <support@natreltherapy.shop>`,
+            to: mainshipper.email,
+            subject: 'Successfully Purchased!!',
+            
+            html: body
+          };
+          
+          transporter.sendMail(mailOptions, function(error, info){
+            if (error) {
+              console.log(error);
+            } else {
+              console.log('Email sent: ' + info.response);
+            }
+          });
           
           // console.log(shippingInfo);
-         const test= productInf.map((shippi)=>{
+         productInf.map((shippi)=>{
             
 
               const ship= new Ship({
@@ -529,64 +587,10 @@ app.post('/create-checkout-session', async (req, res) => {
                   ship.save()
                 
                   .then(()=>{
-                    let count=1
-                    if(count===1){
-                      client.messages
-                        .create({
-                            body: 'thanks for the purchase',
-                            from: '+16073896804',
-                            to: '+2348108726007'
-                          })
-                          .then(message => console.log(message.sid));
-                          count++
-                          console.log(count);
-                          
-                    }
-                        
-                   
 
                         })
-
-
-                    let defaultClient = SibApiV3Sdk.ApiClient.instance;
-
-                    let apiKey = defaultClient.authentications['api-key'];
-                    apiKey.apiKey = process.env.Sib_Api_Key;
-
-                    let apiInstance = new SibApiV3Sdk.TransactionalEmailsApi();
-
-                    const sender={
-                      email:"admin@naturalhairtherapist.com"
-                    }
-                    const receivers=[{
-                      email:'christopherobinna27@gmail.com'
-                    }]
-                    
-                    apiInstance.sendTransacEmail({
-                      sender:sender,
-                      to:receivers,
-                      subject:`this is a testing object`,
-                      textContent:`i am a content`
-
-                    }).then(function(data) {
-                      console.log('API called successfully. Returned data: ' + JSON.stringify(data));
-                    })
-                    .catch((err) => {
-                      console.log(err.message);
-                    })
-                  
-
-
-                    
-
                   })
-               
-                
-
-    }
-   
-  
-    
+    } 
     response.send();
   
 })
