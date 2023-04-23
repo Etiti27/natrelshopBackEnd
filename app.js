@@ -13,8 +13,8 @@ const postCalc=require("./routes/postRoutes/calculateQuan")
 const _ =require('lodash')
 const cookieParser = require("cookie-parser")
 const ejs=require('ejs')
-const accountSid = process.env.ACCOUNT_SID || "AC270dd2e2d127e0c37be7d28f01be33cc";
-const authToken = process.env.AUTH_TOKEN || "0853ea933ac6bcca32934f71046f7152";
+const accountSid = process.env.ACCOUNT_SID  
+const authToken = process.env.AUTH_TOKEN 
 const client = require('twilio')(accountSid, authToken);
 
 
@@ -540,12 +540,12 @@ app.post('/create-checkout-session', async (req, res) => {
 
           console.log(body);
           let transporter = nodemailer.createTransport({
-            host: "premium81.web-hosting.com",
+            host: process.env.EMAIL_HOSTING,
             port: 465,
             secure: true, // true for 465, false for other ports
             auth: {
-              user: "support@natreltherapy.shop", // generated ethereal user
-              pass: "Obinna123456", // generated ethereal password
+              user: process.env.EMAIL_USER, // generated ethereal user
+              pass: process.env.EMAIL_PASSWORD, // generated ethereal password
             },
           });
          
