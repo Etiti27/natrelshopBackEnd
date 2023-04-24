@@ -349,6 +349,7 @@ shipping.push(shippingData)
 
 
 //stripe integration
+let currencysymbol;
 app.post('/create-checkout-session', async (req, res) => {
     const datas=req.body
     
@@ -358,12 +359,19 @@ app.post('/create-checkout-session', async (req, res) => {
     
     req.session.shipper=datas[0]
      mainshipper=req.session.shipper
-    // console.log(mainshipper);
+   
    req.session.productInfo=datas[1]
    productInf=req.session.productInfo
-   console.log(productInf);
+  //  console.log(productInf);
   
-   
+   if(mainshipper.country==='United States'){
+    currencysymbol='usd'
+   }
+   else if(mainshipper.country==="United Kingdom") {
+    currencysymbol='gbp'
+   } else {
+    currencysymbol='eur'
+   }
     
        const line_items= productInf.map((data)=>{
        
@@ -373,7 +381,7 @@ app.post('/create-checkout-session', async (req, res) => {
             return {
               
                     price_data: {
-                      currency: "eur",
+                      currency: currencysymbol,
                       product_data: {
                         name: data.name && data.name,
                         
@@ -416,7 +424,7 @@ app.post('/create-checkout-session', async (req, res) => {
             type: "fixed_amount",
             fixed_amount: {
               amount: 0,
-              currency: "eur",
+              currency: currencysymbol,
             },
             display_name: "Free shipping",
             // Delivers between 5-7 business days
@@ -437,7 +445,7 @@ app.post('/create-checkout-session', async (req, res) => {
             type: "fixed_amount",
             fixed_amount: {
               amount: 1500,
-              currency: "eur",
+              currency: currencysymbol,
             },
             display_name: "Next day air",
             // Delivers in exactly 1 business day
@@ -521,9 +529,9 @@ app.post('/create-checkout-session', async (req, res) => {
            `<table>
               
               <tr>
-                <th> Product ID:     ${product.id}</th> <br/>
-                <th> Name:     ${product.name}</th> <br/>
-                <th> Quantity:      ${product.quantity}</th> 
+                <th> Product ID:   ${product.id} |</th> <br/>
+                <th> Name:   ${product.name} |</th> <br/>
+                <th> Quantity:    ${product.quantity}</th> 
                 
               </tr>
 
@@ -535,7 +543,7 @@ app.post('/create-checkout-session', async (req, res) => {
           })}
           <p>we know the world is full of choices. Thank you for choosing us! We appreciate it.</p>
           <p>We'll let you know as soon as it ships. In the meantime, reach out to our friendly support team with any questions you have. They're super nice...</p>
-          <button style={{padding:"50%"}}><a href="mailto:support@natreltherapy.shop">Email Support</a></button>
+          <button><a href="mailto:${process.env.EMAIL_USER}">Email Support</a></button>
           `
 
           console.log(body);
@@ -550,7 +558,7 @@ app.post('/create-checkout-session', async (req, res) => {
           });
          
           let mailOptions = {
-            from: `"Na'trel Therapy" <support@natreltherapy.shop>`,
+            from: `"Na'trel Therapy" <sales@natreltherapy.shop>`,
             to: mainshipper.email,
             subject: 'Successfully Purchased!!',
             
