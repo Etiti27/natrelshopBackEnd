@@ -8,14 +8,16 @@ const session= require('express-session')
 const MongoStore = require('connect-mongo')
 const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
 const nodemailer=require('nodemailer')
-var SibApiV3Sdk = require('sib-api-v3-sdk');
-const postCalc=require("./routes/postRoutes/calculateQuan")
-const _ =require('lodash')
-const cookieParser = require("cookie-parser")
-const ejs=require('ejs')
-const accountSid = process.env.ACCOUNT_SID  
-const authToken = process.env.AUTH_TOKEN 
-const client = require('twilio')(accountSid, authToken);
+// var SibApiV3Sdk = require('sib-api-v3-sdk');
+// const postCalc=require("./routes/postRoutes/calculateQuan")
+const _ =require('lodash');
+const cookieParser = require("cookie-parser");
+const compression=require("compression")
+
+// const ejs=require('ejs')
+// const accountSid = process.env.ACCOUNT_SID  
+// const authToken = process.env.AUTH_TOKEN 
+// const client = require('twilio')(accountSid, authToken);
 
 
 
@@ -28,29 +30,29 @@ const mongoDBUrl=`mongodb+srv://${process.env.DB_USERNAME}:${process.env.DB_PASS
 
 
 // middlewares
-app.set('view engine', 'ejs');
-app.use('/public', express.static("public"));
+// app.set('view engine', 'ejs');
+// app.use('/public', express.static("public"));
 app.use(bodyParser.urlencoded({ extended: true }));
 app.use(cors())
 app.use(cookieParser());
 // app.use('/stripe', stripe)
 
-  
-app.use('/minus', postCalc)
+
+// app.use('/minus', postCalc)
 
 
 app.use('/webhook', bodyParser.raw({type: "*/*"}))
 app.use(bodyParser.json({type: 'application/json'}))
 app.set('trust proxy', 1)
 app.use(bodyParser.json())
+app.use(compression())
 
 app.use(session({
 secret: process.env.SESSION_SECRET,
 resave: false,
 saveUninitialized: true,
 store: MongoStore.create({ mongoUrl: mongoDBUrl }),
-cookie:{maxAge: 3600 * 24,
-secure: true}
+
   }))
 
 
@@ -72,6 +74,7 @@ app.get('/', function(req, res) {
   //   res.end('welcome to the session demo. refresh!')
   // }
   // console.log(req.session);
+  res.json(`working ...`)
  
 })
  
@@ -90,7 +93,7 @@ app.get('/', function(req, res) {
         required: true
     },
     salePrice:{
-        type:Number,
+        type: Number,
         min:[1, "price can't be less than 1"]
     },
     price:{
@@ -114,28 +117,28 @@ app.get('/', function(req, res) {
     })
 const Product=mongoose.model('product',productSchema);
 const hairElixer= new Product({
-  name:'HAIR ELIXER',
+  name:'HAIR OIL',
   desc: 'There is nothing more satisfying than to have hair care technology that builds and strengthens your hair. With Sisay Cosmetics Golden Hair Elixer, you have just that, a rich 100% Natural Hair elixir that strengthens and adds shine to your precious hair.',
-  salePrice: 25,
-  price: 50,
+  salePrice: 34.95,
+  price: 70.99,
   quantity:1,
   moreDesc:`the secret to thick, healthy, and beautiful hair. the main and one of the most potent ingredients in this elixir is cold-pressed fenugreek oil ( essential oil). this potent plant possesses benefits catering specifically to hair.Fenugreek (Trigonella foenum-graecum). It has a 6000-year history and is commonly called Methi, high concentration of beneficial elements such as Vitamins A, B, and C, as well as phosphates, flavonoids, iron, saponins, and other minerals.It is rich in vitamins A, K, and C, folic acid, potassium, iron, calcium, and proteins, all of which are cornerstones for hair growth.`,
   ingredient:`Glycine Soja (Soybean) Oil, Trigonella Foenum-Graecum Seed Oil, Ricinus Communis (Castor) Seed Oil, Sesamum Indicum (Sesame) Seed Oil, Nigella Sativa Seed Oil, Tocopherol, Parfum,
   Benzyl Benzoate, Limonene, Coumarin, Alpha Isomethyl Ionone, Cinnamal, Geraniol, Citronellol,
   Hexyl Cinnamal, Benzyl Salicylate, Benzyl Alcohol`,
-  image:"HairElixir.jpeg"
+  image:"dailytoxic.png"
 })
 
 const dailyDetox= new Product({
-  name:'DAILY DETOX',
+  name:'DAILY DETOX ELIXIR',
   desc:'Daily Detox Elixir is a powerful blend of natural ingredients carefully selected to rid your body of harmful toxins and free radicals, allowing you to feel refreshed, rejuvenated, and ready to tackle whatever the day brings. ',
-  price:30,
-  salePrice:50,
+  price:60.99,
+  salePrice:24.95,
   quantity:1,
   moreDesc:`Detoxification is essential for maintaining the health of our bodies, especially our hair. Toxins from the environment and the food we eat are continually present in our bodies. These toxins can build up in our organs over time, which can result in a number of health issues, including hair loss. These dangerous toxins can be eliminated from the body through detoxification, which also improves the efficiency of our organs.
 
   There are different organs in our body that can benefit from detoxification for better hair growth.`,
-  image: "dailytoxic.png"
+  image: "HairElixir.jpeg"
 
 })
 const defaultProduct=[hairElixer, dailyDetox]
@@ -277,7 +280,7 @@ app.get("/data/:name", function(req,res){
 
 app.post("/addtocart", function(req,res){
 
-const {name, quantity,  salePrice, image,id}=req.body;
+let {name, quantity,  salePrice, image,id}=req.body;
 
 
  product={name,quantity,salePrice,image,id}
@@ -316,7 +319,7 @@ res.redirect('/cart')
 app.get("/cart", function(req,res){
   
 //  console.log(cart);
-res.send(cart)
+res.json(cart)
 
     
 })
@@ -350,15 +353,17 @@ shipping.push(shippingData)
 
 //stripe integration
 let currencysymbol;
+
 app.post('/create-checkout-session', async (req, res) => {
     const datas=req.body
     
     req.session.ship=datas
     shippingInfo=req.session.ship
-    // console.log(shippingInfo);
+    console.log(shippingInfo);
     
     req.session.shipper=datas[0]
      mainshipper=req.session.shipper
+     console.log(mainshipper);
    
    req.session.productInfo=datas[1]
    productInf=req.session.productInfo
@@ -411,8 +416,8 @@ app.post('/create-checkout-session', async (req, res) => {
     
       payment_method_types: ["card"],
       mode: 'payment',
-      success_url: 'http://localhost:3001/stripe-success',
-      cancel_url: 'http://localhost:3001/cancel',
+      success_url: 'https://natreltherapy.shop/stripe-success',
+      cancel_url: 'https://natreltherapy.shop/cancel',
 
 
     //   shipping_address_collection: {
@@ -526,16 +531,11 @@ app.post('/create-checkout-session', async (req, res) => {
             //   Quantity : ${product.quantity}
             //   Amount: ${product.salePrice}
 
-           `<table>
-              
-              <tr>
-                <th> Product ID:   ${product.id} |</th> <br/>
-                <th> Name:   ${product.name} |</th> <br/>
-                <th> Quantity:    ${product.quantity}</th> 
-                
-              </tr>
-
-            </table>
+           `<h4>PRODUCT INFORMATION</h4>
+           <p> Product ID:   ${product.id} </p>
+           <p> Name:   ${product.name} </p> 
+           <p> Quantity:    ${product.quantity}</p> 
+           
              
            `
               
@@ -543,8 +543,32 @@ app.post('/create-checkout-session', async (req, res) => {
           })}
           <p>we know the world is full of choices. Thank you for choosing us! We appreciate it.</p>
           <p>We'll let you know as soon as it ships. In the meantime, reach out to our friendly support team with any questions you have. They're super nice...</p>
-          <button><a href="mailto:${process.env.EMAIL_USER}">Email Support</a></button>
           `
+const body2= `
+<p>${mainshipper.firstName} ${mainshipper.lastName},  have successfully Purchased the following product(s) </p>
+${productInf.map((product)=>{
+  return(
+  //  `product name : ${product.name}, 
+  //   Quantity : ${product.quantity}
+  //   Amount: ${product.salePrice}
+
+ `<h4>PRODUCT INFORMATION</h4>
+      <p> Product ID:   ${product.id} </p>
+      <p> Name:   ${product.name} </p> 
+      <p> Quantity:    ${product.quantity}</p> 
+ ` 
+  )
+})}
+<h4>SHIPPING ADDRESS</h4>
+<p>Email: ${mainshipper.email}</p>
+<p>Address: ${mainshipper.address}</p>
+<p>Country: ${mainshipper.country}</p>
+<p>City: ${mainshipper.city}</p>
+<p>Postal Code: ${mainshipper.postalCode}</p>
+
+
+`
+
 
           console.log(body);
           let transporter = nodemailer.createTransport({
@@ -566,6 +590,26 @@ app.post('/create-checkout-session', async (req, res) => {
           };
           
           transporter.sendMail(mailOptions, function(error, info){
+            if (error) {
+              console.log(error);
+            } else {
+              console.log('Email sent: ' + info.response);
+            }
+          });
+
+
+
+          //messaging admin about successful product
+
+          let mailOptionss = {
+            from: `"Na'trel Therapy" <sales@natreltherapy.shop>`,
+            to: process.env.EMAIL_USER,
+            subject: 'Purchase Alert!',
+            
+            html: body2
+          };
+          
+          transporter.sendMail(mailOptionss, function(error, info){
             if (error) {
               console.log(error);
             } else {
@@ -689,6 +733,41 @@ app.get("/searchedItem", function(req,res){
 // and set the environment variables. See http://twil.io/secure
 
 
-  app.listen(3000, function(){
-    console.log(`connected successfullyy!!!`);
-  })     
+
+//contactPage post
+
+app.post('/contact', function(req, res){
+const {name, email,subject, message}=req.body
+console.log(req.body);
+
+let transporter = nodemailer.createTransport({
+  host: process.env.EMAIL_HOSTING,
+  port: 465,
+  secure: true, // true for 465, false for other ports
+  auth: {
+    user: process.env.EMAIL_USER, // generated ethereal user
+    pass: process.env.EMAIL_PASSWORD, // generated ethereal password
+  },
+});
+
+let mailOptions = {
+  from:`${name} <${email}>`,
+  to: process.env.EMAIL_USER,
+  subject: subject,
+  
+  html: message
+};
+
+transporter.sendMail(mailOptions, function(error, info){
+  if (error) {
+    console.log(error);
+  } else {
+    console.log('Email sent: ' + info.response);
+  }
+});
+res.json()
+})
+
+app.listen(3000, function(){
+  console.log(`connected successfullyy!!!`);
+})     
