@@ -13,6 +13,13 @@ const nodemailer=require('nodemailer')
 const _ =require('lodash');
 const cookieParser = require("cookie-parser");
 const compression=require("compression")
+const { v1: uuidv1,v4: uuidv4} = require('uuid');
+const passport= require('passport');
+const passportLocalMongoose= require('passport-local-mongoose');
+const bcrypt= require('bcrypt');
+const { object } = require('webidl-conversions')
+const saltRound= 10;
+
 
 // const ejs=require('ejs')
 // const accountSid = process.env.ACCOUNT_SID  
@@ -27,13 +34,19 @@ const mongoDBUrl=`mongodb+srv://${process.env.DB_USERNAME}:${process.env.DB_PASS
 
     mongoose.connect(mongoDBUrl)
 
-
+    const corsOptions = {
+      origin: "https://natreltherapy.shop",
+      credentials: true,
+      "Access-Control-Allow-Credentials": true
+  };
 
 // middlewares
 // app.set('view engine', 'ejs');
 // app.use('/public', express.static("public"));
 app.use(bodyParser.urlencoded({ extended: true }));
-app.use(cors())
+// app.use(cors())
+app.use(cors(corsOptions))
+
 app.use(cookieParser());
 // app.use('/stripe', stripe)
 
@@ -49,11 +62,18 @@ app.use(compression())
 
 app.use(session({
 secret: process.env.SESSION_SECRET,
-resave: false,
+resave: true,
 saveUninitialized: true,
 store: MongoStore.create({ mongoUrl: mongoDBUrl }),
-
+cookie: { 
+  // httpOnly:true,
+  maxAge: 360000000,
+  secure: false
+}
   }))
+app.use(passport.initialize());
+app.use(passport.session());
+app.use(passport.authenticate('session'));
 
 
 // app.use(session({ 
@@ -63,6 +83,15 @@ store: MongoStore.create({ mongoUrl: mongoDBUrl }),
 // cookie: { maxAge: 60000 }}))
 
 // Access the session as req.session
+let transporter = nodemailer.createTransport({
+  host: process.env.EMAIL_HOSTING,
+  port: 465,
+  secure: true, // true for 465, false for other ports
+  auth: {
+    user: process.env.EMAIL_USER, // generated ethereal user
+    pass: process.env.EMAIL_PASSWORD, // generated ethereal password
+  },
+});
 app.get('/', function(req, res) {
   // if (req.session.views) {
   //   req.session.views++
@@ -113,6 +142,9 @@ app.get('/', function(req, res) {
     },
     image:{
       type:String
+    },
+    usage:{
+      type:String
     }
     })
 const Product=mongoose.model('product',productSchema);
@@ -147,7 +179,24 @@ const defaultProduct=[hairElixer, dailyDetox]
 //     throw err
 //   }
 // })
-
+app.post('/populate', (req,res)=>{
+  const {name, desc, salePrice, price, quantity,moreDesc,ingredient, image,usage}=req.body
+  const newProduct= new Product({
+    name:name,
+    desc:desc,
+    salePrice:salePrice,
+    price:price,
+    quantity:quantity,
+    moreDesc:moreDesc,
+    ingredient:ingredient,
+    image:image,
+    usage:usage
+  })
+  newProduct.save((err,result)=>{
+    console.log(result);
+    
+  })
+})
 
 const OurStorySchema= new mongoose.Schema({
     story:{
@@ -256,15 +305,14 @@ Product.find({}, function(err,products){
         res.redirect('/data')
     }
     
-    res.send(products)
-    // res.render('home', {products:products})
-})
-
-})
+    res.send(products);
+    
+});
+});
 
 
 app.get("/data/:name", function(req,res){
-  const namer= _.upperCase(req.params.name)
+  const namer= _.lowerCase(req.params.name)
   
   Product.find({name:namer}, function(err,products){
       res.json(products)
@@ -354,16 +402,22 @@ shipping.push(shippingData)
 //stripe integration
 let currencysymbol;
 
+let mainshipper;
+
+
+let productInf
 app.post('/create-checkout-session', async (req, res) => {
-    const datas=req.body
-    
-    req.session.ship=datas
+    const datas=req.body;
+    req.session.ship=datas;
     shippingInfo=req.session.ship
-    console.log(shippingInfo);
+    const userID=uuidv4().slice(0,5)
+    // console.log(uuidv4());
+    // console.log(shippingInfo);
     
     req.session.shipper=datas[0]
      mainshipper=req.session.shipper
-     console.log(mainshipper);
+    //  console.log(shippingSession.shipper);
+    //  console.log(mainshipper);
    
    req.session.productInfo=datas[1]
    productInf=req.session.productInfo
@@ -377,7 +431,27 @@ app.post('/create-checkout-session', async (req, res) => {
    } else {
     currencysymbol='eur'
    }
-    
+    const customer=await stripe.customers.create({
+      metadata:{
+        userID:userID,
+        cart:JSON.stringify(productInf),
+        customerInfo:JSON.stringify(mainshipper)
+      }
+    })
+
+    // const coupon = await stripe.coupons.create({
+      
+    //   percent_off: 25.5,
+    //   duration: 'once',
+    //   name:"percentage off"
+      
+    // });
+    const promotionCode = await stripe.promotionCodes.create({
+      coupon: 'Obinna27',
+      
+      
+    });
+
        const line_items= productInf.map((data)=>{
        
         
@@ -389,10 +463,14 @@ app.post('/create-checkout-session', async (req, res) => {
                       currency: currencysymbol,
                       product_data: {
                         name: data.name && data.name,
+                        images:[`https://natreltherapy.shop${data.image}`],
+                        
+                        // description: data.description,
                         
                         // description: data.desc,
                         metadata: {
                           id: data.id && data.id,
+                          
                         },
                       },
                       unit_amount: data.salePrice * 100,
@@ -411,13 +489,17 @@ app.post('/create-checkout-session', async (req, res) => {
    
     const session = await stripe.checkout.sessions.create({
         
-        
+      customer:customer.id,
       line_items,
     
       payment_method_types: ["card"],
+      allow_promotion_codes: true,
       mode: 'payment',
       success_url: 'https://natreltherapy.shop/stripe-success',
       cancel_url: 'https://natreltherapy.shop/cancel',
+      // consent_collection: {
+      //   terms_of_service: 'required',
+      // },
 
 
     //   shipping_address_collection: {
@@ -472,6 +554,7 @@ app.post('/create-checkout-session', async (req, res) => {
       },
     
     });
+    
   
     res.send({datas:datas,
         url:session.url,
@@ -481,125 +564,139 @@ app.post('/create-checkout-session', async (req, res) => {
   })
 
   let endpointSecret = process.env.STRIPE_ENDPOINT_SECRET
-  
+  const shipSchema=new mongoose.Schema({
+    userID:String,
+    firstName:String,
+    lastName:String,
+    email:String,
+    address:String,
+    country:String,
+    city:String,
+    postalCode:String,
+    date:String,
+    shipDate:String,
+    product:Object,
+    amountSpent:Number,
+    status:String
+});
+const SHIP= mongoose.model('shippingDetail', shipSchema);
   
   app.post('/webhook', bodyParser.raw({type: 'application/json'}), (request, response) => {
     const sig = request.headers['stripe-signature'];
   
+   
+    let data;
+    let eventType;
+  if(endpointSecret){
     let event;
-  
     try {
-      event = stripe.webhooks.constructEvent(request.body, sig, endpointSecret);
-    } catch (err) {
-      response.status(400).send(`Webhook Error: ${err.message}`);
-      return;
-    }
-  
+    event = stripe.webhooks.constructEvent(request.body, sig, endpointSecret);
+  } catch (err) {
+    response.status(400).send(`Webhook Error: ${err.message}`);
+    return;
+  }
+  data=event.data.object;
+  eventType = event.type;
+}else{
+  data=request.body.data.object;
+  eventType = request.body.type;
+}
+    
+
     // Handle the event
+// console.log(event.data.object);
+    if(eventType==="checkout.session.completed"){
+stripe.customers.retrieve(data.customer)
+.then((customer)=>{
+  const objCus=JSON.parse(customer.metadata.customerInfo);
+  const cartItem=JSON.parse(customer.metadata.cart);
+  console.log(cartItem);
+  console.log("data:", data);
+            let date = new Date();
+            let day = date.getDate();
+            let month = date.getMonth() + 1;
+            let year = date.getFullYear();
+            let currentDate = `${day}-${month}-${year}`
+  
+const userID=uuidv4().slice(0,7)
+  const ships=new SHIP({
+    date:currentDate,
+    userID:customer.metadata.userID ,
+    amountSpent:data.amount_total,
+    firstName:objCus.firstName,
+    lastName:objCus.lastName,
+    email:objCus.email,
+    address:objCus.address,
+    city:objCus.city,
+    country:objCus.country,
+    shipDate:'null',
+    postalCode:objCus.postalCode,
+    product:cartItem,
+    status: 'Not Ship'
+   
 
-    if(event.type==="checkout.session.completed"){
-      console.log(`completed`);
-      const shipSchema=new mongoose.Schema({
-              firstName:String,
-              lastName:String,
-              email:String,
-              address:String,
-              country:String,
-              city:String,
-              postalCode:String,
-              productName:String,
-              quantity:Number,
-              price:Number,
-              product_id:String,
-              date:String
-          })
-          const Ship = mongoose.model('shippingInf', shipSchema)
-          const date = new Date();
+  })
+  
+ 
 
-          let day = date.getDate();
-          let month = date.getMonth() + 1;
-          let year = date.getFullYear();
-          let currentDate = `${day}-${month}-${year}`
-
-
-          const body=`<div style={{color='green'}}> Dear ${mainshipper.firstName} ${mainshipper.lastName}, </div>
+  const body=`<h2> Dear ${objCus.firstName} ${objCus.lastName}, </h2>
+           <br/>
+            <p>You have successfully Purchased the following product(s): </p>
+            
+            ${cartItem.map((cart)=>{
+              return(
+                `
+                product Name: ${cart.name}
+                quantity: ${cart.quantity}
+                `
+              )})}
+                
           <br/>
-          <div>You have successfully Purchased the following product(s): </div>
-          ${productInf.map((product)=>{
-            return(
-            //  `product name : ${product.name}, 
-            //   Quantity : ${product.quantity}
-            //   Amount: ${product.salePrice}
-
-           `<h4>PRODUCT INFORMATION</h4>
-           <p> Product ID:   ${product.id} </p>
-           <p> Name:   ${product.name} </p> 
-           <p> Quantity:    ${product.quantity}</p> 
-           
-             
-           `
-              
-            )
-          })}
           <p>we know the world is full of choices. Thank you for choosing us! We appreciate it.</p>
           <p>We'll let you know as soon as it ships. In the meantime, reach out to our friendly support team with any questions you have. They're super nice...</p>
-          `
-const body2= `
-<p>${mainshipper.firstName} ${mainshipper.lastName},  have successfully Purchased the following product(s) </p>
-${productInf.map((product)=>{
-  return(
-  //  `product name : ${product.name}, 
-  //   Quantity : ${product.quantity}
-  //   Amount: ${product.salePrice}
-
- `<h4>PRODUCT INFORMATION</h4>
-      <p> Product ID:   ${product.id} </p>
-      <p> Name:   ${product.name} </p> 
-      <p> Quantity:    ${product.quantity}</p> 
- ` 
-  )
-})}
-<h4>SHIPPING ADDRESS</h4>
-<p>Email: ${mainshipper.email}</p>
-<p>Address: ${mainshipper.address}</p>
-<p>Country: ${mainshipper.country}</p>
-<p>City: ${mainshipper.city}</p>
-<p>Postal Code: ${mainshipper.postalCode}</p>
-
-
-`
-
-
-          console.log(body);
-          let transporter = nodemailer.createTransport({
-            host: process.env.EMAIL_HOSTING,
-            port: 465,
-            secure: true, // true for 465, false for other ports
-            auth: {
-              user: process.env.EMAIL_USER, // generated ethereal user
-              pass: process.env.EMAIL_PASSWORD, // generated ethereal password
-            },
-          });
-         
-          let mailOptions = {
-            from: `"Na'trel Therapy" <sales@natreltherapy.shop>`,
-            to: mainshipper.email,
-            subject: 'Successfully Purchased!!',
-            
-            html: body
-          };
           
-          transporter.sendMail(mailOptions, function(error, info){
-            if (error) {
-              console.log(error);
-            } else {
-              console.log('Email sent: ' + info.response);
-            }
-          });
+             `
+
+             const body2= `
+             <p>${objCus.firstName} ${objCus.lastName} with userID:${userID},  have successfully Purchased the following product(s) </p>
+            
+              ${cartItem.map((cart)=>{
+                return(
+                  `
+                  product Name: ${cart.name}
+                  quantity: ${cart.quantity}
+                  `
+                )
+                
+              })}
 
 
+             <h4>SHIPPING ADDRESS</h4>
+             <p>Email: ${objCus.email}</p>
+             <p>Address: ${objCus.address}</p>
+             <p>Country: ${objCus.country}</p>
+             <p>City: ${objCus.city}</p>
+             <p>Postal Code: ${objCus.postalCode}</p>`;
 
-          //messaging admin about successful product
+           
+                       
+                        let mailOptions = {
+                          from: `"Na'trel Therapy" <sales@natreltherapy.shop>`,
+                          to: objCus.email,
+                          subject: 'Successfully Purchased!!',
+                          
+                          html: body
+                        };
+                        
+                        transporter.sendMail(mailOptions, function(error, info){
+                          if (error) {
+                            console.log(error);
+                          } else {
+                            console.log('Email sent to customer: ' + info.response);
+                          }
+                        });
+
+                        //messaging admin about successful product
 
           let mailOptionss = {
             from: `"Na'trel Therapy" <sales@natreltherapy.shop>`,
@@ -613,35 +710,24 @@ ${productInf.map((product)=>{
             if (error) {
               console.log(error);
             } else {
-              console.log('Email sent: ' + info.response);
+              console.log('Email sent to admin: ' + info.response);
             }
           });
           
-          // console.log(shippingInfo);
-         productInf.map((shippi)=>{
-            
 
-              const ship= new Ship({
-            
-                  product_id:shippi.id,
-                  date:currentDate,
-                  firstName:mainshipper.firstName,
-                  lastName:mainshipper.lastName,
-                  email:mainshipper.email,
-                  address:mainshipper.address,
-                  city:mainshipper.city,
-                  country:mainshipper.country,
-                  postalCode:mainshipper.postalCode,
-                  productName:shippi.name,
-                  quantity:shippi.quantity,
-                  price:shippi.salePrice
-                  })
-                  ship.save()
-                
-                  .then(()=>{
+  ships.save()
 
-                        })
-                  })
+
+}).then(()=>{
+  
+})
+.catch((err)=>{
+  console.log(err.message);
+})
+
+
+
+                 
     } 
     response.send();
   
@@ -702,7 +788,7 @@ app.post('/deletecart', (req,res)=>{
 
 let searchItem;
 app.post('/searchproduct', (req,res)=>{
-  const search=_.upperCase(req.body.search);
+  const search=_.lowerCase(req.body.search);
   console.log(search);
   Product.findOne({name:search}, function(err, result){
     if(!result){
@@ -768,6 +854,370 @@ transporter.sendMail(mailOptions, function(error, info){
 res.json()
 })
 
+
+
+const userSchema=new mongoose.Schema({
+  firstName:String,
+  lastName:String,
+  Username:String,
+  password:String,
+  country:String,
+  city: String,
+  phoneNumber: Number,
+  email:String
+});
+userSchema.plugin(passportLocalMongoose);
+
+const User= mongoose.model('User', userSchema);
+
+passport.use(User.createStrategy());
+// passport.use(new LocalStrategy(User.authenticate()))
+
+// passport.serializeUser(User.serializeUser());
+// passport.deserializeUser(User.deserializeUser());
+
+
+
+// passport.serializeUser(function(user, done) {
+//   done(null, user);
+// });
+
+// passport.deserializeUser(function(user, done) {
+//   done(null, user);
+// });
+
+// passport.serializeUser(function(User, done) {
+//   done(null, User.id);
+// });
+
+// passport.deserializeUser(function(id, done) {
+//   User.findById(id, function (err, user) {
+//     done(err, user);
+//   });
+// });
+
+
+
+passport.serializeUser(function(user, done) {
+  done(null, user.id);
+});
+
+passport.deserializeUser(function(id, done) {
+  User.findById(id, function (err, user) {
+    done(err, user);
+  });
+});
+// $or: [
+//   {'the_key': 'value1'},
+//   {`the_key': 'value2'}
+// ]
+// app.post('/register',function(req,res){
+//   const {name, username,password, city,country, phone, email}=req.body;
+//   User.findOne({$or:[
+//     {username:username},
+//     {email:email}
+//   ]}, (err, user)=>{
+//     if(user){
+//       console.log(user);
+//       res.status(201).json(`username or Exist exist!`);
+//       // res.redirect('/userfound')
+//     }else{
+// bcrypt.hash(password,saltRound, function(err, hash){
+//   const newUser= new User({
+//     name: name,
+//     username:username,
+//     email:email,
+//     password:hash,
+//     city:city, 
+//     country:country,
+//     phone:phone
+
+//   });
+//   // passport.authenticate("local", (req,res)=>{
+//   //   console.log(`authenticity`);
+//   //   res.redirect('/adminsection')
+//   // })
+//   newUser.save((err, user)=>{
+//     if(err){
+//       console.log(err);
+//     }else{
+//       console.log(`i am logged in`);
+//       passport.authenticate("local")(req,res, function(){
+//                 console.log(`i am authenticated again`);
+//                 // res.json()
+//                 res.redirect('/admin')
+//                 console.log(req.user);
+               
+                
+                
+//               })
+//       res.status(200).json(`registered`);
+     
+//     }
+//   })
+// })
+     
+      // User.register({
+      //   name,
+      //   email,
+      //   phone,
+      //   country,
+      //   city,
+      //   username,
+        
+      // },
+      // password, function(err, user){
+      //   if(user){
+      //     console.log(user);
+      //     passport.authenticate('local')(req,res,function(){
+      //       res.redirect('/adminsection')
+      //     })
+          
+      //   }else{
+      //     throw err
+      //   }
+      // })
+//     }
+//   })
+ 
+// } )
+
+
+//i am the working example
+app.post('/register', (req,res)=>{
+  
+  const {name, username,password, city,country, phone, email}=req.body;
+  console.log(req.body);
+
+User.register({
+  name:name,
+  username:username,
+  city:city,
+  country:country,
+  phone:phone,
+  email:email
+
+}, password, (err, user)=>{
+  if(err){
+    console.log(err);
+    
+  }
+  else{
+   res.json('registered')
+  }
+})
+})
+
+
+
+
+app.post('/logout', (req,res)=>{
+  req.logout((err)=>{
+    if(!err){
+      res.redirect('/cart')
+    }
+  });
+})
+
+// app.post("/login", (req, res, next) => {
+//   passport.authenticate("local", (err, user, info) => {
+//     if (err) throw err;
+//     if (!user){ res.send("No User Exists");}
+
+//     else {
+//       req.logIn(user, (err) => {
+//         if (err) throw err;
+//         res.send("Successfully Authenticated");
+//         console.log(`Successfully Authenticated`);
+//         console.log(req.user);
+//       });
+//     }
+//   })(req, res, next);
+// });
+
+// // app.post("/login", (req, res, next) => {
+// //   passport.authenticate("local", (err, user, info) => {
+// //     if (err) throw err;
+// //     if (!user) {console.log("No User Exists");}
+// //     else {
+// //       req.logIn(user, (err) => {
+// //         if (err) throw err;
+// //         res.send("Successfully Authenticated");
+// //         console.log(`Successfully Authenticated`);
+// //         console.log(req.user);
+// //       });
+// //     }
+// //   })(req, res, next);
+// // });
+
+// app.post('/login', (req,res,next)=>{
+//   const {username, password} = req.body
+//   // console.log(req.body);
+//   User.findOne({username: username},(err,user)=>{
+//     console.log(user);
+//     if(err){
+//       console.log(err);
+//       throw err
+//     }
+   
+//     if(user){
+      
+//       bcrypt.compare(password, user.password, function(err, result) {
+//         if(result===false){
+//           console.log(`user not found`);
+//         }
+//         if(result===true){
+//           console.log(`user found`);
+//           passport.authenticate("local")(req,res,function(){
+//             console.log(`authenticated`);
+//           })
+//         }
+//     });
+//     }
+//   })
+// })
+//i am the working example
+app.post('/login', (req,res) =>{
+
+  const {username, password}=req.body;
+  
+  const user=new User({
+        username:username,
+        password:password})
+  req.login(user, function(err){
+    if(err){
+      console.log(err);
+    }
+    
+    else{
+      
+      User.findOne({username:username}, function(err,admin){
+        if(!admin){
+          console.log(`here`);
+        }
+        if(admin){
+          if(admin.username==='admin'){
+            passport.authenticate("local")(req,res, function(){
+           
+              res.json('admin')
+            
+            })
+           }
+           if(admin.username !=='admin'){
+            res.json('not admin')
+           }
+        }
+      
+      })
+      
+    }
+  })
+})
+
+app.post('/admin', (req, res) => {
+  if(req.isAuthenticated()) {
+    
+    const {clientId}=req.body
+    console.log(clientId);
+    SHIP.findOne({userID:clientId},(err, result)=>{
+      if(err){
+        console.log(err)
+      }
+      if(!result){
+        res.json(`not found`)
+      }
+      else{
+        console.log(result);
+        res.json(result)
+      }
+    })
+    
+  }else{
+    res.json('not admin')
+  }
+ 
+  // console.log(req.session);
+})
+
+
+app.post('/confirmshipping', (req,res)=>{
+  const {shipped, clientId}=req.body;
+  console.log(shipped);
+  console.log(clientId);
+  let date = new Date();
+      let day = date.getDate();
+      let month = date.getMonth() + 1;
+      let year = date.getFullYear();
+      let currentDate = `${day}-${month}-${year}`
+  if(req.isAuthenticated()){
+    SHIP.findOneAndUpdate({userID:clientId}, {$set:{status:shipped, shipDate:currentDate}}, {new: true}, (err, doc) => {
+      if (err) {
+          console.log("Something wrong when updating data!");
+      }
+      
+      if(doc){
+        console.log(doc);
+        //send message to client
+        let message='product you recent purchase from our store has been shipped!'
+        let mailOptions = {
+          from: `"Na'trel Therapy" <sales@natreltherapy.shop>`,
+          to: doc.email,
+          subject: 'Product Shipped',
+          
+          html: message
+        };
+        
+        transporter.sendMail(mailOptions, function(error, info){
+          if (error) {
+            console.log(error);
+          } else {
+            console.log('Email sent to customer: ' + info.response);
+          }
+        });
+
+        //send to admin
+
+        let message2='You just confirmed a shipping'
+        let mailOptions2 = {
+          from: `"Na'trel Therapy" <sales@natreltherapy.shop>`,
+          to: process.env.EMAIL_USER,
+          subject: 'Ship Confirmation',
+          
+          html: message2
+        };
+        
+        transporter.sendMail(mailOptions2, function(error, info){
+          if (error) {
+            console.log(error);
+          } else {
+            console.log('Email sent to customer: ' + info.response);
+          }
+        });
+      }
+      res.json('admin')
+  });
+
+  }else(
+    res.json('not admin')
+  )
+  
+
+})
+
+app.get('/allorders', (req,res)=>{
+  if(req.isAuthenticated()){
+    SHIP.find({}, (err,result)=>{
+      if(err){
+        console.log(err);
+  
+      }if(result){
+        res.json(result)
+      }
+    })
+
+  }
+ 
+})
 app.listen(3000, function(){
   console.log(`connected successfullyy!!!`);
 })     
